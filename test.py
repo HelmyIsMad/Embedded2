@@ -47,6 +47,12 @@ print(f"Preprocessing done: audio shape={y.shape}", flush=True)
 # Extract 1-second chunks (same as training)
 samples_per_chunk = int(SAMPLE_RATE * DURATION)
 
+# Warm up librosa by calling it once
+print("Pre-loading librosa...", flush=True)
+_ = librosa.feature.mfcc(y=y[:samples_per_chunk], sr=SAMPLE_RATE, n_mfcc=N_MFCC, 
+                         n_fft=N_FFT, hop_length=HOP_LENGTH)
+print("Librosa ready", flush=True)
+
 # Process each 1-second chunk
 all_predictions = []
 chunk_count = 0
@@ -65,11 +71,17 @@ for i in range(0, len(y) - samples_per_chunk + 1, samples_per_chunk):
     mfcc_std = np.std(mfcc_centered, axis=1, keepdims=True)
     mfcc_normalized = mfcc_centered / (mfcc_std + 1e-8)
     
-    # Add channel dimension: (13, 50) -> (50, 13, 1)
-    mfcc_input = np.transpose(mfcc_normalized)  # (50, 13)
-    mfcc_input = np.expand_dims(mfcc_input, axis=-1)  # (50, 13, 1)
-    mfcc_input = np.expand_dims(mfcc_input, axis=0)  # (1, 50, 13, 1)
-    print(f"Input shape: {mfcc_input.shape}", flush=True)
+    # Ensure we have exactly 50 frames (trim or pad as needed)
+    if mfcc_normalized.shape[1] > 50:
+        mfcc_normalized = mfcc_normalized[:, :50]  # Trim to 50 frames
+    elif mfcc_normalized.shape[1] < 50:
+        pad_width = ((0, 0), (0, 50 - mfcc_normalized.shape[1]))
+        mfcc_normalized = np.pad(mfcc_normalized, pad_width, mode='constant', constant_values=0)
+    
+    # Add channel dimension: (13, 50) -> (13, 50, 1) - same as training
+    mfcc_input = np.expand_dims(mfcc_normalized, axis=-1)  # (13, 50, 1)
+    mfcc_input = np.expand_dims(mfcc_input, axis=0)  # (1, 13, 50, 1)
+    print(f"Input shape (after adjustment): {mfcc_input.shape}", flush=True)
     
     # Make prediction
     prediction = model(tf.constant(mfcc_input), training=False).numpy()
